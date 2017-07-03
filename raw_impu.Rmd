@@ -7,6 +7,9 @@ output:
 ---
 
 ```{r load Data, include=FALSE}
+library(plyr)
+library(dplyr)
+library(lubridate)
 library(Hmisc)
 vip_raw <- spss.get("../Data/VIP_raw.sav", datevars = "provdat")
 vip_raw$provdat <- as.Date(vip_raw$provdat, format = "%Y%m%d")
@@ -22,9 +25,6 @@ hos_raw$INDATUMA <- as.Date(hos_raw$INDATUMA, format = "%Y%m%d")
 #no missing in "LopNr", "ULORSAK", "dodsdatn"
 #use ULORSAK - "primary casue of death"
 #this dod data has only CVD death. means we assume everyone survive or Not die from CVD. 
-library(plyr)
-library(dplyr)
-library(lubridate)
 dod$yeard <- year(dod$dodsdatn)
 dod_medtid <- subset(dod,select = c(LopNr,yeard))
 
