@@ -1,0 +1,365 @@
+---
+title: "Clean and impute"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r load Data, include=FALSE}
+library(Hmisc)
+vip_raw <- spss.get("../Data/VIP_raw.sav", datevars = "provdat")
+vip_raw$provdat <- as.Date(vip_raw$provdat, format = "%Y%m%d")
+
+dod <- spss.get("../Data/dod_CVD.sav", datevars = "dodsdatn")
+dod$dodsdatn <- as.Date(dod$dodsdatn, format = "%Y%m%d")
+
+hos_raw <- spss.get("../Data/hos_CVD.sav")
+hos_raw$INDATUMA <- as.Date(hos_raw$INDATUMA, format = "%Y%m%d")
+```
+
+```{r death registry, include=FALSE}
+#no missing in "LopNr", "ULORSAK", "dodsdatn"
+#use ULORSAK - "primary casue of death"
+#this dod data has only CVD death. means we assume everyone survive or Not die from CVD. 
+library(plyr)
+library(dplyr)
+library(lubridate)
+dod$yeard <- year(dod$dodsdatn)
+dod_medtid <- subset(dod,select = c(LopNr,yeard))
+
+#dod_icd9 <- filter(dod_medtid,dod_medtid$yeard<1997)
+
+#dod_icd10 <- filter(dod_medtid,dod_medtid$yeard>1996)
+
+#tb_icd9 <- table(droplevels(dod_icd9)$ULORSAK,dod_icd9$yeard)
+#tb_icd10<- table(droplevels(dod_icd10)$ULORSAK,dod_icd10$yeard)
+
+#distribution of CVD death per year 
+#prop.table(tb_icd9,margin=2)*100
+#prop.table(tb_icd10,margin=2)*100
+
+#!!!!!!!!!!!!!!!!!!!!!!Cardiovascular causes of death were fatal events described in the International Classification of Diseases (ICD)-10 codes I10 to I15 (hypertensive diseases), I20 to 25 (ischemic heart diseases), I60 to I69 (cerebrovascular diseases), I70 and I71 (other atherosclerosis), which were used in the SCORE models
+
+####Cardiovascular mortality was defined as ICD-9 codes 401 through 414 and 426 through 443, with the exception of the following ICD-9 codes for definitely non-atherosclerotic causes of death: 426.7, 429.0, 430.0, 432.1, 437.3, 437.4, and 437.5. We also classified 798.1 (instantaneous death) and 798.2 (death within 24 h of symptom onset) as cardiovascular deaths.
+
+## d' Augustino 2007 CVD as a composite of CHD (coronary death, myocardial infarction, coronary insufficiency, and angina), cerebro- vascular events (including ischemic stroke, hemorrhagic stoke, and transient ischemic attack), peripheral artery disease (intermittent claudication), and heart failure
+
+## CVD as the underlying cause of death was defined as the following International Classification of Disease (ICD)-10-SE codes: I10???I15, I20???I25, I44???I51, I61???I69, I70???I73 and R96 corresponding to the previously used ICD-9 codes defined in the SCORE project.
+```
+
+```{r hospitalisation, include=FALSE}
+#Remove duplicates, take the first ever hospitalisation as censor point
+hos_medtid <- hos_raw[c(1,3,6,8)]
+hos_ndup <- subset(hos_medtid, !duplicated(hos_medtid$LopNr)) #without duplicates, using the earliest readings
+hos_ndup$yearh<- year(hos_ndup$INDATUMA)
+
+hos_mer <- subset(hos_ndup,select = c(LopNr,yearh))
+
+
+#table(hos_ndup$yearh)
+
+#hos_icd9 <- filter(hos_ndup,hos_ndup$yearh<1997)
+
+#hos_icd10 <- filter(hos_ndup,hos_ndup$yearh>1996)
+
+#tb_icd9h <- table(droplevels(hos_icd9)$HDIA,hos_icd9$yearh)
+#tb_icd10h<- table(droplevels(hos_icd10)$HDIA,hos_icd10$yearh)
+
+#distribution of CVD death per year 
+#prop.table(tb_icd9h,margin=2)*100
+#prop.table(tb_icd10h,margin=2)*100
+```
+
+```{r try rlist, echo=FALSE}
+library(rlist)
+library(purrr)
+vip_raw$prov_year <- year(vip_raw$provdat)
+
+#select only observations which are followed up for 10 years
+#Registry data ends at 2015
+vip_raw <- vip_raw %>%
+  filter(prov_year>1989) %>%
+  filter(prov_year<2006) %>%
+  filter(alder>30)
+
+#select only varaibles with overall missing rate less than 30%
+na.cutoff<- function(df,tna){
+  x <- df
+NArate <- function(x){
+  length(which(is.na(x)==TRUE))/length(x)*100
+}
+vip_NA <- lapply(df,NArate)
+ x <- df[,which(rlist::list.filter(vip_NA<tna))]
+}
+vip.lattNA <- na.cutoff(vip_raw,30)
+
+#examine systematic missing (if variables were introduced or removed at certain year)
+#True = missing in %
+#prop_year <- function(x){
+#  round(prop.table(table(is.na(x),vip.lattNA$prov_year),margin = 2),3)*100
+#}
+
+#vip_year <- lapply(vip.lattNA,prop_year)
+#vip_year
+
+#extract j for alchohol,suspecting missing-not-at-random
+
+#h5,h4,h1antal, e15 connected to e14?
+#integrate b3,h1,g2,g3.g1
+
+#If any variable has more than 10% missing in only a specific year while others are lower than 5%, they are considered structural missing variables
+#https://stats.stackexchange.com/questions/124512/missing-data-not-at-random-advice-needed-on-method suggests to use the mean value to replace missing... 
+#Potential structural missing: i1,g4,g5,f12,f13,e7:e14,e3:e4,c8,b42
+
+vip.lattNA <- select(vip.lattNA,-c(AterPNr,SenPnr,provdat,plats,langd,vikt,blods2,fasta,spar,l1,mat01,mat02,mat03,mat04,mat05,mat06,mat07,mat08,mat09,mat10,mat11,mat12,mat13,mat14,mat15,mat16,mat17,mat18,mat19,mat20,mat21,mat22,mat23,mat24,mat25,mat26,mat27,mat28,mat29,mat30,mat31,mat32,mat33,mat34,mat35,mat36,mat37,mat38,mat39,mat40,mat41,mat42,mat43,mat45,mat46,mat47,mat48,mat49,mat50,mat51,mat52,mat53,mat54,mat55,mat56,mat57,mat58,mat59,mat60,mat61,mat62,mat63,mat64,mat65,Tryck,fil,nyk.kod1,nyk.kod2,nyk.kod3,nyk.kod,us.ar,fyear,vcnamn,Kommun,SjvReg,c0))
+
+vip_smoke<- select(vip_raw,c(h1a,h1b,h1c,h1d,h1e,h1f,h1g,h1antal,h6,j06,j07,j11,j12))
+vip_merge <- cbind(vip.lattNA,vip_smoke)
+
+#next one look for dietary predictor (use data from year 1993 onward)
+```
+
+```{r survival time, echo=FALSE}
+vip_dod <- merge(vip_merge, dod_medtid,all.x = TRUE)
+vip_dod$cvd.dod <- ifelse(is.na(vip_dod$yeard),0,1)
+vip_dod$cvd.dod <- factor(vip_dod$cvd.dod,levels=c(0,1),labels = c('Survived','CVD death'))
+#describe(vip_dod$cvd.dod)
+
+vip_dod$sur.time.d <- ifelse(is.na(vip_dod$yeard),10,vip_dod$yeard-vip_dod$prov_year)
+vip_dod$sur.time.d[vip_dod$sur.time.d==0] <- 1
+#describe(vip_dod$sur.time.d)
+#table(vip_dod$sur.time.d>10)
+
+vip_dod$cvd.dod10 <- ifelse(is.na(vip_dod$yeard),0,
+                            ifelse(vip_dod$yeard-vip_dod$prov_year>10,0,1))
+vip_dod$cvd.dod10 <- factor(vip_dod$cvd.dod10,levels=c(0,1),labels = c('Survived 10 years','CVD death in 10 years'))
+#describe(vip_dod$cvd.dod10)
+
+table(vip_dod$cvd.dod,vip_dod$prov_year)
+prop.table(table(vip_dod$cvd.dod,vip_dod$prov_year),margin=2)
+
+table(vip_dod$cvd.dod10,vip_dod$prov_year)
+prop.table(table(vip_dod$cvd.dod10,vip_dod$prov_year),margin=2) 
+#I really doubt any model can differenciate them... 
+
+df <- merge(hos_mer,dod_medtid,all=TRUE)
+df$cvde <- ifelse(is.na(df$yearh),df$yeard,df$yearh)
+
+vip_e <- merge(vip_merge, df, all.x = TRUE)
+vip_e$cvd.event <- ifelse(is.na(vip_e$cvde),0,1)
+vip_e$cvd.event <- factor(vip_e$cvd.event,levels=c(0,1),labels = c('Survived','CVD event in lifetime'))
+
+vip_e$cvd.event10 <- ifelse(is.na(vip_e$cvde),0,
+                            ifelse(vip_e$cvde-vip_e$prov_year>10,0,1))
+vip_e$cvd.event10 <- factor(vip_e$cvd.event10,levels=c(0,1),labels = c('Survived 10 years','CVD event in 10 years'))
+
+table(vip_e$cvd.event,vip_e$prov_year)
+prop.table(table(vip_e$cvd.event,vip_e$prov_year),margin = 2)
+
+vip_e$sur.time.e <- ifelse(is.na(vip_e$cvde),10,vip_e$cvde-vip_e$prov_year)
+vip_e$sur.time.e[vip_e$sur.time.e==0] <- 1
+
+vip_e$cvd.dod10 <- vip_dod$cvd.dod10
+
+describe(vip_e$cvd.dod10)
+#Isn't it a bit too strange?? Need to review the criteria? 
+#table(vip_e$sur.time.e<0,vip_e$past.cvd) #recorded and self-reported CVD event
+
+#table(vip_e$cvd.event,vip_e$past.cvd) #The unknown group does not look like very innocent... 
+
+#Join all together
+#vip_e$cvd.dod10 <- vip_dod$cvd.dod10
+#vip_e$cvd.dod <- vip_dod$cvd.dod
+#vip_e$sur.time.d <- vip_dod$sur.time.d
+```
+
+```{r filter past cvd events}
+#CVD history
+vip_e$c8[is.na(vip_e$c8)] <- 0
+vip_e$c8[vip_e$c8==2] <- 0
+vip_e$past.cvd <- factor(vip_e$c8, levels=c(0,1), labels=c('No CVD history','With CVD history'))
+
+#Angina Tx
+describe(vip_e$c5b)
+vip_e$c5b[vip_e$c5b==-999] <- 0
+vip_e$c5b[is.na(vip_e$c5b)] <- 0
+vip_e$angina.tx <- factor(vip_e$c5b, levels=c(0,1), labels=c('No Angina','With Angina'))
+
+vip.pastcvd <- vip_e %>%
+  filter(sur.time.e<0|past.cvd==1|angina.tx==1) %>%
+  select(-c(past.cvd,angina.tx,cvde,LopNr,c5b,c8))
+
+vip.no.pastcvd <- vip_e %>%
+  filter(sur.time.e>0,past.cvd!=1,angina.tx!=1) %>%
+  select(-c(past.cvd,angina.tx,cvde,LopNr,c5b,c8))
+
+table(vip.no.pastcvd$cvd.event10,vip.no.pastcvd$prov_year)
+round(prop.table(table(vip.no.pastcvd$cvd.event10,vip.no.pastcvd$prov_year),margin = 2),3)*100
+
+table(vip.no.pastcvd$cvd.event,vip.no.pastcvd$prov_year)
+round(prop.table(table(vip.no.pastcvd$cvd.event,vip.no.pastcvd$prov_year),margin = 2),3)*100
+
+table(vip.no.pastcvd$sur.time.e,vip.no.pastcvd$prov_year)
+round(prop.table(table(vip.no.pastcvd$sur.time.e,vip.no.pastcvd$prov_year),margin = 2),3)*100
+
+table(vip.no.pastcvd$cvd.event10,vip.no.pastcvd$prov_year)
+ev<- prop.table(table(vip.no.pastcvd$cvd.event10,vip.no.pastcvd$prov_year),margin = 2)[2,]
+ev <- data.frame(as.vector(ev)*100)
+
+table(vip.no.pastcvd$cvd.dod10,vip.no.pastcvd$prov_year)
+d<- prop.table(table(vip.no.pastcvd$cvd.dod10,vip.no.pastcvd$prov_year),margin = 2)[2,]
+d <- data.frame(as.vector(d)*100)
+p<- cbind(ev,d)
+p$year <- seq(1990,2005,1)
+p$event.10year<- p$as.vector.ev....100
+p$death.10year <- p$as.vector.d....100
+p <- p%>% select(year,event.10year,death.10year)
+
+library(reshape2)
+p<- melt(p,id.vars = "year")
+p$value <- round(p$value,1)
+
+#png(filename="event_rate.png",units="in", width=8, height=6, pointsize=11, res=96)
+ggplot(data=p, aes(x=year, y=value, group=variable,color=variable,label = value)) +
+    geom_line(stat = "identity") +geom_point() +ylab("CVD event in 10 years (%)")+xlab("Year")+
+  scale_colour_discrete(name  ="CVD event",breaks=c("event.10year", "death.10year"),labels=c("Hospitalisation & death", "Death only"))+theme(legend.position="bottom",panel.background = element_blank(),axis.line = element_line(colour = "black"))+scale_y_continuous(limits = c(0,15))+geom_text(vjust=0,nudge_y = 0.5)#+theme_bw()+ggtitle("10-year CVD event rates from 1990 to 2005")
+#dev.off()
+```
+
+```{r clean data}
+v.toclean <- select(vip.no.pastcvd,-c(yearh,yeard,cvd.event))
+#manually arrange variables: categorical variables -> numeric-> outcome (+survival time) -> to be discarded
+
+#specific changes for some variables... 
+v.toclean$b2 <- ifelse(v.toclean$b2==1&2&3,1,ifelse(v.toclean$b2==4&5&6&7&8,2,3))
+v.toclean$b1[v.toclean$b1==8] <- 9
+v.toclean$b1[v.toclean$b1==5] <- 2
+v.toclean$b42[v.toclean$b42==4] <- 9
+v.toclean$c2[v.toclean$c2==3] <- 9
+v.toclean$c3[v.toclean$c3==3] <- 9
+
+v.toclean$f6[v.toclean$f6==6] <- 9
+v.toclean$f16[v.toclean$f16==0] <- 9
+
+v.toclean$h1s<- ifelse(!is.na(v.toclean$h1a),1,ifelse(!is.na(v.toclean$h1b),2,
+                              ifelse(!is.na(v.toclean$h1c),3,ifelse(!is.na(v.toclean$h1d),4,
+                                            ifelse(!is.na(v.toclean$h1e),5,ifelse(!is.na(v.toclean$h1f),6,
+                                                                                  ifelse(!is.na(v.toclean$h1g),7,NA))))))) 
+v.toclean$h1antal[v.toclean$h1antal==0] <- 9
+
+v.toclean$j06 <- ifelse(v.toclean$j06>1,2,v.toclean$j06)
+v.toclean$j07 <- ifelse(v.toclean$j06>1,2,v.toclean$j07)
+
+v.toclean$i5[v.toclean$j06==2] <- 2
+v.toclean$i5[v.toclean$j06==1] <- 1
+
+v.toclean$i4[v.toclean$j07==2] <- 2
+v.toclean$i4[v.toclean$j07==1] <- 1
+
+v.toclean$i3[v.toclean$j11==2] <- 2
+v.toclean$i3[v.toclean$j11==1] <- 1
+
+v.toclean$i2[v.toclean$j12==2] <- 2
+v.toclean$i2[v.toclean$j12==1] <- 1
+
+v.toclean$alder <- v.toclean$prov_year-v.toclean$byear
+NAchange <- function(x,v){
+  x[is.na(x)] <- v
+  x
+}
+
+v.toclean <- select(v.toclean,c(b1,b2,b3a,b42,b43,c1,c2,c3,c4,c5a,c5c,c5d,c5e,c5f,c6,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,g1a,g1b,g1c,g1d,g3a,g3b,g3c,g3d,g3e,g3f,g3g,g4,g5,g6,g7,g8,i1,i2,i3,i4,i5,h1s,h1antal,h4,h6,gender,alder,bmi,skol,stg,blods0,sbt,sur.time.e,cvd.event10,prov_year))
+
+str(v.toclean)
+#make all NA into 9 and as a category 
+v.toclean$c5a[v.toclean$c5a==-999] <- NA
+v.toclean$c5c[v.toclean$c5c==-999] <- NA
+v.toclean$c5d[v.toclean$c5d==-999] <- NA
+v.toclean$c5e[v.toclean$c5e==-999] <- NA
+v.toclean$c5f[v.toclean$c5f==-999] <- NA
+v.toclean[,c(1:71)]<- lapply(v.toclean[,c(1:71)],NAchange,9)
+v.toclean[,c(1:71)] <- lapply(v.toclean[,c(1:71)],factor)
+```
+
+```{r}
+#Numeric variables cleaning
+#Remove outliners
+#source("http://goo.gl/UUyEzD")
+
+outlierKD <- function(dt, var) {
+  var_name <- eval(substitute(var),eval(dt))
+  tot <- sum(!is.na(var_name))
+  na1 <- sum(is.na(var_name))
+  m1 <- round(mean(var_name, na.rm = T),3)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  outlier <- boxplot.stats(var_name)$out
+  mo <- round(mean(outlier),3)
+  var_name <- ifelse(var_name %in% outlier, NA, var_name)
+  boxplot(var_name, main="Without outliers")
+  hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  na2 <- sum(is.na(var_name))
+  message("Outliers identified: ", na2 - na1, " from ", tot, " observations")
+  message("Proportion (%) of outliers: ", round((na2 - na1) / tot*100),3)
+  message("Mean of the outliers: ", mo)
+  m2 <- round(mean(var_name, na.rm = T),3)
+  message("Mean without removing outliers: ", m1)
+  message("Mean if we remove outliers: ", m2)
+  response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+  if(response == "y" | response == "yes"){
+    dt[as.character(substitute(var))] <- invisible(var_name)
+    assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+    message("Outliers successfully removed", "\n")
+    return(invisible(dt))
+  } else{
+    message("Nothing changed", "\n")
+    return(invisible(var_name))
+  }
+}
+
+v.toclean$bmi <- outlierKD(v.toclean,bmi) #answer yes
+v.toclean$skol <- outlierKD(v.toclean,skol) #answer yes
+v.toclean$stg <- outlierKD(v.toclean,stg) #answer yes
+v.toclean$blods0 <- outlierKD(v.toclean,blods0) #answer yes
+v.toclean$sbt <- outlierKD(v.toclean,sbt) #answer yes
+```
+
+```{r mice numeric}
+#Ref:https://stats.stackexchange.com/questions/46719/multiple-imputation-and-model-selection
+#Ref: https://stats.stackexchange.com/questions/99334/fast-missing-data-imputation-in-r-for-big-data-that-is-more-sophisticated-than-s
+
+v.tosplit <- v.toclean
+library(mice)
+#Training set and test set are imputated independently
+
+#temporal validation
+v.train <- v.tosplit %>% filter(prov_year<2000)
+v.train.num <- v.train %>% select(c(bmi,skol,stg,blods0,sbt,gender,alder,c5a,c5e,c6))
+v.train.c <- v.train %>% select(-c(bmi,skol,stg,blods0,sbt,gender,alder,c5a,c5e,c6))
+
+ini <- mice(v.train.num, maxit=0, pri=F)
+meth <- ini$meth
+meth[c("gender","alder","c5a","c5e","c6")] <- ""
+m.tr <- mice(v.train.num,meth=meth,m=5,seed = 156)
+tr.num.mice <- complete(m.tr) 
+
+tr <- cbind(v.train.c,tr.num.mice)
+tr <- select(tr,c(b1,b2,b3a,b42,b43,c1,c2,c3,c4,c5a,c5c,c5d,c5e,c5f,c6,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,g1a,g1b,g1c,g1d,g3a,g3b,g3c,g3d,g3e,g3f,g3g,g4,g5,g6,g7,g8,i1,i2,i3,i4,i5,h1s,h1antal,h4,h6,gender,alder,bmi,skol,stg,blods0,sbt,sur.time.e,cvd.event10)) #arrange them again #remove prov_year
+
+#Test set
+v.test <- v.tosplit %>% filter(prov_year>1999)
+v.test.num <- v.test %>% select(c(bmi,skol,stg,blods0,sbt,gender,alder,c5a,c5e,c6))
+v.test.c <- v.test %>% select(-c(bmi,skol,stg,blods0,sbt,gender,alder,c5a,c5e,c6))
+
+m.ts <- mice(v.test.num,meth=meth,m=5,seed = 156)
+v.ts.mice <- complete(m.ts) 
+
+ts <- cbind(v.test.c,v.ts.mice)
+ts <- select(ts,c(b1,b2,b3a,b42,b43,c1,c2,c3,c4,c5a,c5c,c5d,c5e,c5f,c6,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,g1a,g1b,g1c,g1d,g3a,g3b,g3c,g3d,g3e,g3f,g3g,g4,g5,g6,g7,g8,i1,i2,i3,i4,i5,h1s,h1antal,h4,h6,gender,alder,bmi,skol,stg,blods0,sbt,sur.time.e,cvd.event10)) #arrange them again #remove prov_year
+
+write.csv(tr, file = "vtr.mice.csv",row.names=FALSE)
+write.csv(ts, file = "vts.mice.csv",row.names=FALSE)
+```
